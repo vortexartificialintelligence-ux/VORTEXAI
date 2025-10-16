@@ -1,0 +1,716 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vortex AI Search</title>
+    <!-- Load Tailwind CSS via CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Firebase Imports for Auth and Firestore (mandatory for multi-user apps) -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        // ADDED: getFirestore and setLogLevel are imported here
+        import { getFirestore, setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        
+        // Expose Firebase components globally for use in the main script
+        window.firebase = {
+            initializeApp,
+            getAuth,
+            signInAnonymously,
+            signInWithCustomToken,
+            onAuthStateChanged,
+            getFirestore,
+            setLogLevel
+        };
+    </script>
+    
+    <!-- Use Inter font family and custom dark colors -->
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #000000; /* Pure black background */
+            color: #f3f4f6; /* Light text */
+            padding-bottom: 8rem; /* Space for the fixed footer */
+        }
+        /* Custom gradient for the 'Vortex' text - now standard light text */
+        .vortex-gradient {
+            color: #f3f4f6; /* Standard light text color for visibility on black background */
+        }
+        /* Spotlight/Cylindrical style for vortex-1 (Kept for potential reuse) */
+        .vortex-spotlight {
+            font-family: 'Inter', sans-serif;
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            border-radius: 9999px;
+            font-size: 0.875rem;
+            font-weight: 700;
+            text-transform: lowercase;
+            background-color: rgba(167, 139, 250, 0.15);
+            color: #a78bfa;
+            box-shadow: 0 0 15px rgba(167, 139, 250, 0.4);
+            margin-bottom: 2rem;
+        }
+
+        /* Typing animation for the loading state */
+        .typing-indicator span {
+            display: inline-block;
+            animation: bounce 0.6s infinite alternate;
+        }
+
+        .typing-indicator span:nth-child(2) {
+            animation-delay: 0.2s;
+        }
+
+        .typing-indicator span:nth-child(3) {
+            animation-delay: 0.4s;
+        }
+
+        @keyframes bounce {
+            from {
+                transform: translateY(0);
+            }
+            to {
+                transform: translateY(-5px);
+            }
+        }
+
+        /* --- Custom Styles for AI Message Content (Lists and Text) --- */
+        .ai-message-content p, 
+        .ai-message-content ul, 
+        .ai-message-content ol {
+            margin-bottom: 0.75rem; 
+        }
+        
+        .ai-message-content ul, 
+        .ai-message-content ol {
+            padding-left: 1.5rem; 
+        }
+        
+        .ai-message-content ul li {
+            list-style-type: disc; 
+            margin-bottom: 0.5rem; 
+        }
+        
+        .ai-message-content ol li {
+            list-style-type: decimal; 
+            margin-bottom: 0.5rem; 
+        }
+
+        /* Ensure code blocks are styled */
+        .ai-message-content pre {
+            background-color: #1f2937; 
+            padding: 0.75rem;
+            border-radius: 0.5rem;
+            overflow-x: auto;
+        }
+        .ai-message-content code {
+            font-family: 'monospace';
+            font-size: 0.9rem;
+            color: #d1d5db; 
+        }
+        
+    </style>
+</head>
+<body>
+
+    <!-- 1. Fixed Header -->
+    <header class="fixed top-0 left-0 right-0 z-20 bg-[#111827] border-b border-gray-800 p-4">
+        <div class="flex items-center justify-between max-w-7xl mx-auto px-2 sm:px-4">
+            
+            <!-- Left Group: Menu Icon, VORTEX AI Name, and NEW Team Button -->
+            <div class="flex items-center space-x-2 sm:space-x-4">
+                
+                <!-- Existing Menu Icon (Hamburger) -->
+                <button class="text-gray-400 hover:text-cyan-400 transition p-2 rounded-lg">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path></svg>
+                </button>
+                
+                <!-- VORTEX AI Name -->
+                <div class="text-lg font-extrabold tracking-tight vortex-gradient">
+                    VORTEX AI
+                </div>
+
+                <!-- NEW: Team Button/Link -->
+                <button id="team-button" class="text-sm font-medium text-gray-400 hover:text-cyan-400 transition hidden sm:flex items-center space-x-1">
+                    <!-- User Group Icon -->
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857m0 0a5.002 5.002 0 019.288 0M12 10a5 5 0 00-5 5v2m5-7a3 3 0 00-3-3V7a3 3 0 003 3v0z"></path></svg>
+                    <span>Team</span>
+                </button>
+            </div>
+
+            <!-- Action Button -->
+            <button id="auth-button" class="bg-white text-gray-900 text-sm font-semibold px-4 py-1.5 rounded-full hover:bg-gray-200 transition duration-300 shadow-lg">
+                Sign In
+            </button>
+        </div>
+    </header>
+
+    <!-- 2. Main Content Area (Chat Container and Initial Prompt) -->
+    <main class="flex flex-col pt-24 pb-32 px-4 min-h-screen">
+        
+        <!-- Initial Prompt Area (Shown only when chat is empty) -->
+        <div id="initial-state" class="flex flex-col items-center justify-center w-full flex-grow text-center max-w-3xl mx-auto my-auto">
+            
+            <!-- Main Prompt: Reduced the font sizes for better responsiveness -->
+            <h1 class="text-3xl sm:text-4xl md:text-5xl font-semibold leading-tight mb-4 text-white">
+                Hello! What can I help you with?
+            </h1>
+            
+            <!-- Tagline: Ask Less, Know More. -->
+            <p class="text-xl sm:text-2xl font-light mb-12 vortex-gradient">
+                Ask Less, Know More.
+            </p>
+            <!-- The input placeholder now implies where to start searching -->
+
+        </div>
+
+        <!-- Chat Container (Hidden initially, shown after focus or first query) -->
+        <div id="chat-container" class="w-full max-w-4xl mx-auto flex flex-col space-y-8 mt-4 hidden">
+            <!-- Messages will be dynamically added here -->
+        </div>
+    </main>
+
+    <!-- 3. Fixed Bottom Input Bar (Floating 'Island' Query) -->
+    <footer class="fixed bottom-0 left-0 right-0 z-20 flex justify-center p-4">
+        <!-- Island Container: Dark gray/black -->
+        <div class="w-full max-w-4xl bg-gray-900 border border-gray-700 rounded-3xl shadow-2xl p-3 sm:p-4">
+            
+            <!-- Input Bar -->
+            <div class="flex items-center space-x-3 relative">
+                
+                <!-- Plus/Attachment Icon -->
+                <div class="relative">
+                    <button id="attach-button" class="text-gray-400 hover:text-cyan-400 transition p-1.5 rounded-full flex items-center justify-center flex-shrink-0" disabled>
+                        <!-- Plus Icon -->
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
+                    </button>
+
+                    <!-- Dropdown Menu: Kept dark -->
+                    <div id="attachment-menu" class="absolute bottom-full mb-3 left-0 w-40 bg-gray-800 rounded-xl shadow-xl border border-gray-700 hidden transform translate-y-0 opacity-100 transition duration-300">
+                        <button class="w-full text-left px-4 py-2 text-sm text-gray-300 hover:bg-gray-700 rounded-t-xl transition duration-150 flex items-center space-x-2">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13.5"></path></svg>
+                            <span>Attach File</span>
+                        </button>
+                        <button class="w-full text-left px-4 py-2 text-sm text-gray-300 hover:bg-gray-700 rounded-b-xl transition duration-150 flex items-center space-x-2">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path></svg>
+                            <span>Import Data</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- UPDATED FEATURE: LLM Summarization/Key Points Button (Now professional English) -->
+                <button id="summary-button" 
+                        class="text-sm px-3 py-2 rounded-full bg-cyan-700 text-white hover:bg-cyan-600 transition duration-300 flex items-center justify-center flex-shrink-0 whitespace-nowrap hidden" 
+                        title="💡 Generate Key Insights / Executive Summary"
+                        disabled>
+                    💡 Generate Key Insights
+                </button>
+
+                <!-- Input Field -->
+                <input type="text" id="user-input" placeholder="ask anything.."
+                       class="w-full bg-gray-800 border-none p-3 sm:p-4 rounded-full text-white placeholder-gray-300 text-base sm:text-lg focus:outline-none focus:ring-2 focus:ring-cyan-500 transition duration-300 font-light"
+                       disabled>
+    
+                <!-- Send Button -->
+                <button id="send-button" class="text-lg p-2 rounded-full bg-black text-white hover:bg-gray-800 transition duration-300 flex items-center justify-center flex-shrink-0" disabled>
+                    <!-- Up Arrow Icon -->
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7"></path></svg>
+                </button>
+            </div>
+
+        </div>
+    </footer>
+
+    <!-- 4. NEW: Team Modal/Overlay (Hidden by default) -->
+    <div id="team-modal" class="fixed inset-0 z-30 bg-black bg-opacity-80 backdrop-blur-sm flex justify-center items-center p-4 hidden">
+        <div class="bg-gray-900 border border-gray-700 rounded-xl shadow-2xl w-full max-w-2xl p-6 md:p-8 transform transition-all duration-300 scale-95 opacity-0" id="team-content">
+            <div class="flex justify-between items-center mb-6 border-b border-gray-700 pb-4">
+                <h2 class="text-3xl font-bold text-white">Our Leadership Team</h2>
+                <button id="close-team-modal" class="text-gray-400 hover:text-cyan-400 transition">
+                    <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                </button>
+            </div>
+
+            <div class="space-y-8">
+                <!-- Profile Card 1: Founder -->
+                <div class="flex items-center space-x-6 bg-gray-800 p-4 rounded-xl border border-gray-700">
+                    <div class="flex-shrink-0 w-20 h-20 bg-cyan-700 rounded-full flex items-center justify-center text-4xl font-bold text-white border-4 border-cyan-500">
+                        G
+                    </div>
+                    <div>
+                        <h3 class="text-xl font-bold text-white">Gaurav Ghadigaonkar</h3>
+                        <p class="text-lg text-cyan-400 font-semibold mb-1">Founder (CEO)</p>
+                        <p class="text-sm text-gray-400">Driving the vision and innovation behind VORTEX AI's decentralized intelligence architecture.</p>
+                    </div>
+                </div>
+
+                <!-- Profile Card 2: Co-founder -->
+                <div class="flex items-center space-x-6 bg-gray-800 p-4 rounded-xl border border-gray-700">
+                    <div class="flex-shrink-0 w-20 h-20 bg-purple-700 rounded-full flex items-center justify-center text-4xl font-bold text-white border-4 border-purple-500">
+                        S
+                    </div>
+                    <div>
+                        <!-- UPDATED: Co-founder Name -->
+                        <h3 class="text-xl font-bold text-white">Shreyas Chinkate</h3>
+                        <p class="text-lg text-purple-400 font-semibold mb-1">Co-founder (CTO)</p>
+                        <p class="text-sm text-gray-400">Leading the core engineering and development of our LLM grounding and search capabilities.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+
+    <script>
+        const apiKey = ""; 
+        const API_URL = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+
+        // Global environment variables (must be used as per instructions)
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        let auth;
+        let isGenerating = false;
+        // chatHistory stores the conversation in the format required by the API
+        let chatHistory = []; 
+        let userId;
+
+        // --- Utility Functions ---
+
+        /**
+         * Manages the visibility and enabled state of feature buttons.
+         * @param {boolean} show Whether to show the button.
+         * @param {boolean} enable Whether to enable the button.
+         */
+        function toggleFeatureButtons(show, enable = true) {
+            const summaryButton = document.getElementById('summary-button');
+            if (show) {
+                summaryButton.classList.remove('hidden');
+                summaryButton.disabled = !enable;
+            } else {
+                summaryButton.classList.add('hidden');
+            }
+        }
+
+        /**
+         * Manages the transition from initial prompt screen to chat interface.
+         */
+        function activateChatUI() {
+            const initialState = document.getElementById('initial-state');
+            const chatContainer = document.getElementById('chat-container');
+
+            // Only perform transition if we are currently in the initial state
+            if (initialState && !initialState.classList.contains('hidden')) {
+                // Ensure chat container is displayed when activated
+                chatContainer.classList.remove('hidden'); 
+                // Hide the initial large prompt
+                initialState.classList.add('hidden');
+                
+                // If there are already messages (e.g., from history load), scroll to bottom
+                chatContainer.scrollTop = chatContainer.scrollHeight;
+            }
+        }
+        
+        /**
+         * Renders a message (user or AI) into the chat container.
+         * @param {string} role 'user' or 'ai'
+         * @param {string} text The message content (Markdown supported)
+         * @param {string | null} sources Citation sources if available
+         * @returns {HTMLElement} The created message element
+         */
+        function renderMessage(role, text, sources = null) {
+            // CRITICAL: Activate chat UI before rendering any message
+            activateChatUI(); 
+            
+            const container = document.getElementById('chat-container');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `flex ${role === 'user' ? 'justify-end' : 'justify-start'} max-w-full`;
+            
+            const content = document.createElement('div');
+            
+            // Apply different styles based on the role
+            if (role === 'user') {
+                content.className = 'bg-cyan-600 text-white p-3 rounded-2xl rounded-br-md shadow-lg max-w-3xl whitespace-pre-wrap';
+            } else {
+                // AI bubble with slightly lighter background and max width
+                content.className = 'ai-message-content bg-gray-800 text-gray-200 p-4 rounded-2xl rounded-tl-md shadow-lg max-w-4xl';
+                
+                // Convert simple Markdown to basic HTML (mainly bolding and line breaks)
+                text = text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>'); // Bold
+                text = text.replace(/(\*\*|__)(.*?)\1/g, '<strong>$2</strong>'); // Italic/Underscore
+            }
+
+            // NOTE: The AI header text uses the .vortex-gradient class.
+            content.innerHTML = role === 'user' ? text : `
+                <div class="flex items-center space-x-2 mb-2 font-semibold vortex-gradient text-sm">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-6.75-3.25z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11l-3-3-3 3"></path></svg>
+                    <span>VORTEX AI</span>
+                </div>
+                <div>${text}</div>
+            `;
+            
+            messageDiv.appendChild(content);
+            container.appendChild(messageDiv);
+            
+            // Scroll to the latest message
+            container.scrollTop = container.scrollHeight;
+
+            return messageDiv;
+        }
+        
+        /**
+         * Renders the animated loading indicator.
+         * @returns {HTMLElement} The created loading element
+         */
+        function renderLoading() {
+            activateChatUI(); // Ensure chat UI is active even for loading
+            
+            const container = document.getElementById('chat-container');
+            const loadingDiv = document.createElement('div');
+            loadingDiv.id = 'loading-indicator';
+            loadingDiv.className = 'flex justify-start max-w-full';
+            // NOTE: The loading indicator's text uses the .vortex-gradient class for "VORTEX AI is thinking..."
+            loadingDiv.innerHTML = `
+                <div class="bg-gray-800 text-gray-200 p-4 rounded-2xl rounded-tl-md shadow-lg max-w-4xl">
+                    <div class="flex items-center space-x-2 mb-2 font-semibold vortex-gradient text-sm">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.75 17L9 20l-1 1h8l-1-1-6.75-3.25z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11l-3-3-3 3"></path></svg>
+                        <span>VORTEX AI is thinking...</span>
+                    </div>
+                    <div class="typing-indicator text-white text-xl">
+                        <span>.</span><span>.</span><span>.</span>
+                    </div>
+                </div>
+            `;
+            container.appendChild(loadingDiv);
+            container.scrollTop = container.scrollHeight;
+            return loadingDiv;
+        }
+
+        /**
+         * Generic function to call the Gemini API with retry logic.
+         * @param {object} payload The API payload (contents, tools, systemInstruction, etc.)
+         * @param {string} apiUrl The specific API endpoint URL
+         * @returns {Promise<{text: string}>} The generated text result.
+         */
+        async function fetchWithRetry(payload, apiUrl) {
+            const maxRetries = 5;
+            let lastError = null;
+
+            for (let attempt = 0; attempt < maxRetries; attempt++) {
+                try {
+                    const response = await fetch(apiUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+
+                    if (response.status === 429) {
+                        const delay = Math.pow(2, attempt) * 1000 + Math.random() * 1000;
+                        console.warn(`Rate limit hit. Retrying in ${delay / 1000}s (Attempt ${attempt + 1}/${maxRetries})`);
+                        await new Promise(resolve => setTimeout(resolve, delay));
+                        continue; 
+                    }
+
+                    if (!response.ok) {
+                        throw new Error(`HTTP error! status: ${response.status}`);
+                    }
+
+                    const result = await response.json();
+                    const candidate = result.candidates?.[0];
+
+                    if (candidate && candidate.content?.parts?.[0]?.text) {
+                        const text = candidate.content.parts[0].text;
+                        return { text };
+                    } else {
+                        throw new Error("API response was valid but contained no generated text.");
+                    }
+
+                } catch (error) {
+                    lastError = error;
+                    if (attempt === maxRetries - 1) {
+                        console.error("API call failed after multiple retries.", lastError);
+                        throw new Error("Failed to connect to AI service.");
+                    }
+                    const delay = Math.pow(2, attempt) * 1000 + Math.random() * 1000;
+                    // Exponential backoff delay
+                    await new Promise(resolve => setTimeout(resolve, delay));
+                }
+            }
+            throw lastError;
+        }
+
+        // --- Core Gemini API Logic ---
+
+        async function handleQuery() {
+            const inputField = document.getElementById('user-input');
+            const sendButton = document.getElementById('send-button');
+            const userQuery = inputField.value.trim();
+
+            if (!userQuery || isGenerating) return;
+
+            // 1. Disable inputs and set generating state
+            isGenerating = true;
+            inputField.value = '';
+            inputField.disabled = true;
+            sendButton.disabled = true;
+            document.getElementById('attach-button').disabled = true;
+            toggleFeatureButtons(false, false); // Hide/Disable feature button while querying
+
+            // 2. Render user message and push to chat history
+            renderMessage('user', userQuery);
+
+            // MANDATORY: Add user query to chat history
+            chatHistory.push({ role: "user", parts: [{ text: userQuery }] });
+
+            const loadingIndicator = renderLoading();
+
+            try {
+                // System instruction to force numbered points (1., 2., 3., etc.)
+                const systemPrompt = "You are VORTEX AI, a powerful, multi-modal search and intelligence engine. Provide concise, clear, and contextually rich answers. Structure your entire response as a numbered list (1., 2., 3., etc.). Each number should cover one main topic or finding. Avoid introductory or concluding paragraphs outside of the numbered structure. Use bolding for key terms.";
+            
+                const payload = {
+                    contents: chatHistory, 
+                    tools: [{ "google_search": {} }],
+                    systemInstruction: {
+                        parts: [{ text: systemPrompt }]
+                    },
+                };
+                
+                // 3. Call API 
+                const response = await fetchWithRetry(payload, API_URL);
+                
+                // 4. Remove loading state
+                loadingIndicator.remove();
+                
+                // 5. Render AI response
+                renderMessage('ai', response.text);
+
+                // MANDATORY: Add AI response to chat history
+                chatHistory.push({ role: "model", parts: [{ text: response.text }] });
+                
+                // Enable and show the summary button after a successful model response
+                toggleFeatureButtons(true, true);
+                
+            } catch (error) {
+                console.error("Query failed:", error);
+                loadingIndicator.remove();
+                renderMessage('ai', `Dukh hai, ek galti ho gayi: ${error.message}. Kripya dobara prayas karein.`);
+                toggleFeatureButtons(false, false); // Hide features on error
+            } finally {
+                // 6. Re-enable main inputs
+                isGenerating = false;
+                inputField.disabled = false;
+                sendButton.disabled = false;
+                document.getElementById('attach-button').disabled = false;
+                inputField.focus();
+            }
+        }
+        
+        /**
+         * LLM-powered feature to summarize the last AI response.
+         */
+        async function handleSummary() {
+            // 1. Find the last AI message
+            const lastModelMessage = chatHistory.slice().reverse().find(msg => msg.role === 'model');
+            
+            if (!lastModelMessage || isGenerating) {
+                console.warn("No previous AI message found to summarize, or generator is busy.");
+                return;
+            }
+
+            const summaryButton = document.getElementById('summary-button');
+            const inputField = document.getElementById('user-input');
+            const sendButton = document.getElementById('send-button');
+
+            // 2. Disable all interactive elements
+            isGenerating = true;
+            summaryButton.disabled = true;
+            inputField.disabled = true;
+            sendButton.disabled = true;
+            document.getElementById('attach-button').disabled = true;
+            toggleFeatureButtons(false, false); // Hide the button while summarizing
+
+            const loadingIndicator = renderLoading();
+
+            try {
+                const textToSummarize = lastModelMessage.parts[0].text;
+                
+                // System instruction for professional English summary (remains unchanged)
+                const summarizationSystemPrompt = "You are the VORTEX AI Advanced Summarization Engine. Your task is to analyze the preceding text and provide a highly concise executive summary, limited to 3-5 professional, high-level bullet points. The output must be strictly in clear, professional English. Do not include any introductory or concluding sentences; provide only the bulleted list.";
+                
+                // Create a new, specific payload for summarization
+                const summaryPayload = {
+                    contents: [{ 
+                        role: "user", 
+                        parts: [{ text: `Provide an executive summary and key insights for the following text: \n\n---\n\n${textToSummarize}` }] 
+                    }],
+                    systemInstruction: {
+                        parts: [{ text: summarizationSystemPrompt }]
+                    },
+                };
+                
+                // 3. Call the API for summarization
+                const response = await fetchWithRetry(summaryPayload, API_URL);
+
+                // 4. Remove loading state
+                loadingIndicator.remove();
+                
+                // 5. Render Summary (UPDATED prefix)
+                const formattedSummary = `**💡 Key Insights (Executive Summary)**\n\n${response.text}`;
+                renderMessage('ai', formattedSummary);
+
+                // NOTE: We do NOT add the summary to chatHistory (it's a tool/helper action)
+
+            } catch (error) {
+                console.error("Summary generation failed:", error);
+                loadingIndicator.remove();
+                renderMessage('ai', `Executive Summary feature mein galti ho gayi: ${error.message}. Kripya dobara prayas karein.`);
+            } finally {
+                // 6. Re-enable main inputs and feature button
+                isGenerating = false;
+                inputField.disabled = false;
+                sendButton.disabled = false;
+                document.getElementById('attach-button').disabled = false;
+                // Show feature button again if the operation was related to a model response
+                toggleFeatureButtons(true, true); 
+                inputField.focus();
+            }
+        }
+
+        // --- Team Modal Logic ---
+
+        /**
+         * Toggles the visibility and applies transition effects to the Team Modal.
+         * @param {boolean} show True to show, false to hide.
+         */
+        function toggleTeamModal(show) {
+            const modal = document.getElementById('team-modal');
+            const content = document.getElementById('team-content');
+
+            if (show) {
+                modal.classList.remove('hidden');
+                // Use a slight delay to allow the browser to register the display:block before starting transition
+                setTimeout(() => {
+                    content.classList.remove('scale-95', 'opacity-0');
+                    content.classList.add('scale-100', 'opacity-100');
+                }, 10);
+            } else {
+                content.classList.remove('scale-100', 'opacity-100');
+                content.classList.add('scale-95', 'opacity-0');
+                // Hide the modal after the transition completes (300ms defined in CSS)
+                setTimeout(() => {
+                    modal.classList.add('hidden');
+                }, 300); 
+            }
+        }
+
+
+        // --- Initialization and Event Listeners ---
+
+        function setupEventListeners() {
+            const inputField = document.getElementById('user-input');
+            document.getElementById('send-button').addEventListener('click', handleQuery);
+            inputField.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') {
+                    handleQuery();
+                }
+            });
+            
+            // Listener for the Summary button
+            document.getElementById('summary-button').addEventListener('click', handleSummary);
+
+            // Attachment menu toggle logic (keeping previous behavior)
+            const attachButton = document.getElementById('attach-button');
+            const attachmentMenu = document.getElementById('attachment-menu');
+            
+            attachButton.addEventListener('click', () => {
+                attachmentMenu.classList.toggle('hidden');
+            });
+
+            document.addEventListener('click', (event) => {
+                if (!attachButton.contains(event.target) && !attachmentMenu.contains(event.target)) {
+                    attachmentMenu.classList.add('hidden');
+                }
+            });
+
+            // NEW: Team Modal Event Listeners
+            const teamButton = document.getElementById('team-button');
+            const closeTeamModalButton = document.getElementById('close-team-modal');
+            const teamModal = document.getElementById('team-modal');
+
+            teamButton.addEventListener('click', () => {
+                toggleTeamModal(true);
+            });
+
+            closeTeamModalButton.addEventListener('click', () => {
+                toggleTeamModal(false);
+            });
+
+            // Close modal when clicking outside the content box
+            teamModal.addEventListener('click', (e) => {
+                if (e.target === teamModal) {
+                    toggleTeamModal(false);
+                }
+            });
+
+            // Close modal on ESC key press
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape' && !teamModal.classList.contains('hidden')) {
+                    toggleTeamModal(false);
+                }
+            });
+        }
+        
+        async function initializeApp() {
+            try {
+                if (window.firebase) {
+                    // Destructure all required Firebase components
+                    const { initializeApp, getAuth, signInAnonymously, signInWithCustomToken, getFirestore, setLogLevel } = window.firebase;
+                    
+                    // 1. Initialize Firebase
+                    const app = initializeApp(firebaseConfig);
+                    auth = getAuth(app);
+                    
+                    // ADDED: Initialize Firestore and set log level for robust development
+                    const db = getFirestore(app);
+                    setLogLevel('debug');
+                    
+                    // 2. Log in (using custom token if available, otherwise anonymous)
+                    if (initialAuthToken) {
+                        await signInWithCustomToken(auth, initialAuthToken);
+                    } else {
+                        await signInAnonymously(auth);
+                    }
+                    
+                    userId = auth.currentUser?.uid || 'anonymous';
+                    
+                    console.log("App initialized and user signed in:", userId);
+                } else {
+                    console.error("Firebase not loaded. Check script imports.");
+                }
+
+            } catch (error) {
+                console.error("Firebase initialization or sign-in failed:", error);
+                document.getElementById('auth-button').textContent = "Auth Error";
+            } finally {
+                 // 3. Enable Inputs regardless of Firebase success
+                document.getElementById('user-input').disabled = false;
+                document.getElementById('send-button').disabled = false;
+                document.getElementById('attach-button').disabled = false;
+                document.getElementById('user-input').focus();
+            }
+        }
+        
+        // Initial setup on load
+        window.onload = () => {
+            initializeApp();
+            setupEventListeners();
+        };
+
+    </script>
+
+</body>
+</html>
